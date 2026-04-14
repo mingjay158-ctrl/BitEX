@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    name: Build and Publish Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install ARM GCC toolchain
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi
+
+      - name: Build firmware
+        run: make all
+
+      - name: Package firmware artifacts
+        run: |
+          mkdir -p release
+          cp build/*.bin release/ 2>/dev/null || true
+          cp build/*.hex release/ 2>/dev/null || true
+          cp build/*.elf release/ 2>/dev/null || true
+          test "$(ls -A release)" || (echo "No firmware artifacts found to package" && exit 1)
+          cd release && zip -r ../BitEX-firmware-${{ github.ref_name }}.zip .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: BitEX ${{ github.ref_name }}
+          body: |
+            ## BitEX GD32F407 Audio Driver ${{ github.ref_name }}
+
+            ### Firmware Artifacts
+            | File | Description |
+            |------|-------------|
+            | `*.bin` | Raw binary — flash with DFU or J-Link |
+            | `*.hex` | Intel HEX — flash with GD-Link or OpenOCD |
+            | `*.elf` | ELF with debug symbols — for debugging with GDB |
+
+            ### Flashing
+            ```bash
+            # Using OpenOCD with GigaDevice GD32F4x target
+            openocd -f interface/jlink.cfg -f target/gd32f4x.cfg \
+              -c "program BitEX.hex verify reset exit"
+            ```
+          files: |
+            BitEX-firmware-${{ github.ref_name }}.zip
+            build/*.bin
+            build/*.hex
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
